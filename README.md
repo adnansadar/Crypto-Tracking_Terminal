@@ -48,7 +48,7 @@ The browser never calls CoinGecko directly. Express provides a stable applicatio
 
 - Dedicated asset routes with market, supply, ATH/ATL, and project metadata
 - Price and candlestick modes across 7D, 30D, 90D, and 1Y ranges
-- Private account-backed research notes with no guest workspace persistence
+- Research notes, watchlists, and saved screens available to guests and accounts
 
 ### Comparison lab
 
@@ -70,7 +70,7 @@ npm run dev
 
 Open `http://localhost:3000`. The API runs on `http://localhost:4000`.
 
-Public market and asset research work without a database or authentication credentials. Saving workspace data requires an account. Copy `.env.example` to `.env` when enabling optional services.
+Public research and guest workspaces work without a database or authentication credentials. Guest work is saved in the current browser; signed-in work syncs through PostgreSQL. Copy `.env.example` to `.env` when enabling optional services.
 
 ## Workspace persistence and authentication
 
@@ -93,7 +93,7 @@ Authentication and browser API requests use the web application's same-origin
 proxy. In production, set `BETTER_AUTH_URL` to the public web URL and register
 `<web-url>/api/auth/callback/google` as the Google authorized redirect URI.
 
-Guests can browse markets, comparisons, and asset research. Watchlists, saved screens, and private notes are locked until sign-in and are never stored in browser local storage. The selected color theme remains local to the browser.
+Guests can browse markets, compare assets, save watchlists and screens, and write notes. Guest work is stored under `cryptoTerminal.guestWorkspace.v1` in localStorage and remains separate from account data. Clearing browser data removes guest work. Sign-in and sign-out switch workspaces without merging them. Account data stays private and synced through authenticated API routes.
 
 ## Commands
 
@@ -137,7 +137,7 @@ Authenticated workspace routes use Better Auth session cookies and enforce resou
 
 - Polling is used instead of paid WebSocket access so the public demo can remain on free tiers.
 - The market overview represents the fetched top-250 universe rather than claiming to be a complete global index.
-- Public research is available without an account; all persistent workspace features require authentication.
+- All research features are available without an account; account workspaces additionally support cross-device sync.
 - The project stays a modular monolith with one explicit API boundary instead of introducing unnecessary microservices.
 
 Market data is provided by CoinGecko. Financial charts use Lightweight Charts and retain TradingView attribution.

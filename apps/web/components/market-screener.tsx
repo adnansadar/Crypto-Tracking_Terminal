@@ -2,12 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   flexRender,
   getCoreRowModel,
@@ -25,16 +20,8 @@ import type {
 } from "@crypto-terminal/contracts";
 import { currencies } from "@crypto-terminal/contracts";
 import { formatCurrency, formatPercent } from "@/lib/format";
-import {
-  addPrimaryWatchlistItem,
-  createSavedScreen,
-  getMarkets,
-  getPrimaryWatchlist,
-  marketSearchParams,
-  removePrimaryWatchlistItem,
-} from "@/lib/api";
-import { AuthGateDialog } from "./auth-gate-dialog";
-import { useAuth } from "./auth-provider";
+import { getMarkets, marketSearchParams } from "@/lib/api";
+import { useWorkspace } from "@/lib/use-workspace";
 
 type Category = { category_id: string; name: string };
 type Props = {
@@ -61,7 +48,13 @@ export function MarketScreener({
   categories,
   initialQuery,
 }: Props) {
-  const { user, isPending: authPending } = useAuth();
+  const { operations, owner, isPending: authPending } = useWorkspace();
+  const {
+    addPrimaryWatchlistItem,
+    createSavedScreen,
+    getPrimaryWatchlist,
+    removePrimaryWatchlistItem,
+  } = operations;
   const queryClient = useQueryClient();
   const resolvedQuery = useMemo(
     () =>
@@ -80,7 +73,6 @@ export function MarketScreener({
   );
   const [query, setQuery] = useState<MarketQuery>(resolvedQuery);
   const queryRef = useRef(query);
-  const [gate, setGate] = useState<"watchlist" | "saved screens" | null>(null);
   const [showWatchlist, setShowWatchlist] = useState(Boolean(query.ids));
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
     change7d: false,
@@ -90,15 +82,6 @@ export function MarketScreener({
   const [searchValue, setSearchValue] = useState(query.search);
   const toolbarRef = useRef<HTMLFormElement>(null);
 
-  const result = useQuery({
-    queryKey: ["markets", query],
-    queryFn: () => getMarkets(query),
-    initialData:
-      query === resolvedQuery ? (initialData ?? undefined) : undefined,
-    placeholderData: keepPreviousData,
-    refetchInterval: 60_000,
-  });
-
   const navigate = useCallback((next: Partial<MarketQuery>) => {
     const merged = { ...queryRef.current, ...next };
     queryRef.current = merged;
@@ -107,29 +90,63 @@ export function MarketScreener({
   }, []);
 
   const watchlistResult = useQuery({
-    queryKey: ["workspace", "primary-watchlist", user?.id],
+    queryKey: ["workspace", "primary-watchlist", owner],
     queryFn: getPrimaryWatchlist,
-    enabled: Boolean(user),
+    enabled: !authPending,
   });
   const watchlist = useMemo(
     () => watchlistResult.data ?? [],
     [watchlistResult.data],
   );
+  const emptyWatchlist =
+    showWatchlist && !watchlistResult.isPending && watchlist.length === 0;
+  // Membership is the source of truth; do not synchronize it through a second
+  // state update/history navigation after every optimistic change.
+  const marketQuery = useMemo(
+    () => (showWatchlist ? { ...query, ids: watchlist.join(",") } : query),
+    [query, showWatchlist, watchlist],
+  );
+  const result = useQuery({
+    queryKey: ["markets", marketQuery],
+    queryFn: () => getMarkets(marketQuery),
+    enabled:
+      !showWatchlist ||
+      (!authPending && watchlistResult.isSuccess && watchlist.length > 0),
+    initialData:
+      JSON.stringify(marketQuery) === JSON.stringify(resolvedQuery)
+        ? (initialData ?? undefined)
+        : undefined,
+    staleTime: 60_000,
+    placeholderData: (previous) => {
+      if (!previous || !showWatchlist) return undefined;
+      return {
+        ...previous,
+        data: previous.data.filter((coin) => watchlist.includes(coin.id)),
+      };
+    },
+    refetchInterval: 60_000,
+  });
   const watchlistMutation = useMutation({
-    mutationFn: async (coinId: string) => {
-      if (watchlist.includes(coinId)) await removePrimaryWatchlistItem(coinId);
+    mutationFn: async ({
+      coinId,
+      remove,
+    }: {
+      coinId: string;
+      remove: boolean;
+    }) => {
+      if (remove) await removePrimaryWatchlistItem(coinId);
       else await addPrimaryWatchlistItem(coinId);
       return coinId;
     },
-    onMutate: async (coinId) => {
-      const key = ["workspace", "primary-watchlist", user?.id] as const;
+    onMutate: async ({ coinId, remove }) => {
+      const key = ["workspace", "primary-watchlist", owner] as const;
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<string[]>(key) ?? [];
-      const next = previous.includes(coinId)
+      const next = remove
         ? previous.filter((id) => id !== coinId)
-        : [...previous, coinId];
+        : [...new Set([...previous, coinId])];
       queryClient.setQueryData(key, next);
-      if (showWatchlist) navigate({ ids: next.join(","), page: 1 });
+      if (showWatchlist && queryRef.current.page !== 1) navigate({ page: 1 });
       return { key, previous };
     },
     onError: (_error, _coinId, context) => {
@@ -137,7 +154,7 @@ export function MarketScreener({
     },
     onSettled: () =>
       queryClient.invalidateQueries({
-        queryKey: ["workspace", "primary-watchlist", user?.id],
+        queryKey: ["workspace", "primary-watchlist", owner],
       }),
   });
   const saveScreenMutation = useMutation({
@@ -150,7 +167,7 @@ export function MarketScreener({
     }) => createSavedScreen(name, value),
     onSuccess: () =>
       queryClient.invalidateQueries({
-        queryKey: ["workspace", "screens", user?.id],
+        queryKey: ["workspace", "screens", owner],
       }),
   });
 
@@ -190,10 +207,7 @@ export function MarketScreener({
   }
 
   function handleWatchlistMode(active: boolean) {
-    if (active && !user) {
-      setGate("watchlist");
-      return;
-    }
+    if (active === showWatchlist) return;
     setShowWatchlist(active);
     navigate({ ids: active ? watchlist.join(",") : "", page: 1 });
   }
@@ -266,16 +280,18 @@ export function MarketScreener({
         cell: ({ row }) => (
           <button
             type="button"
-            className={`watch-button ${!user ? "locked" : watchlist.includes(row.original.id) ? "active" : ""}`}
-            aria-label={
-              user
-                ? `${watchlist.includes(row.original.id) ? "Remove" : "Add"} ${row.original.name} ${watchlist.includes(row.original.id) ? "from" : "to"} watchlist`
-                : `Sign up to add ${row.original.name} to a watchlist`
+            className={`watch-button ${watchlist.includes(row.original.id) ? "active" : ""}`}
+            aria-label={`${watchlist.includes(row.original.id) ? "Remove" : "Add"} ${row.original.name} ${watchlist.includes(row.original.id) ? "from" : "to"} watchlist`}
+            disabled={
+              authPending ||
+              watchlistResult.isPending ||
+              watchlistMutation.isPending
             }
-            disabled={authPending || watchlistMutation.isPending}
             onClick={() => {
-              if (!user) setGate("watchlist");
-              else watchlistMutation.mutate(row.original.id);
+              watchlistMutation.mutate({
+                coinId: row.original.id,
+                remove: watchlist.includes(row.original.id),
+              });
             }}
           >
             ★
@@ -283,11 +299,23 @@ export function MarketScreener({
         ),
       },
     ],
-    [authPending, query.currency, user, watchlist, watchlistMutation],
+    [
+      authPending,
+      query.currency,
+      watchlist,
+      watchlistMutation,
+      watchlistResult.isPending,
+    ],
   );
 
+  const tableData = useMemo(() => {
+    const coins = result.data?.data ?? [];
+    return showWatchlist
+      ? coins.filter((coin) => watchlist.includes(coin.id))
+      : coins;
+  }, [result.data?.data, showWatchlist, watchlist]);
   const table = useReactTable({
-    data: result.data?.data ?? [],
+    data: tableData,
     columns,
     state: { columnVisibility },
     onColumnVisibilityChange: setColumnVisibility,
@@ -295,18 +323,15 @@ export function MarketScreener({
     manualSorting: true,
   });
   const overview = result.data?.overview;
-  const pagination = result.data?.pagination;
+  const pagination =
+    emptyWatchlist || result.isPlaceholderData ? null : result.data?.pagination;
 
   function saveCurrentScreen() {
-    if (!user) {
-      setGate("saved screens");
-      return;
-    }
     const name = window.prompt("Name this screen", "My market screen")?.trim();
     if (!name) return;
     saveScreenMutation.mutate({
       name,
-      value: Object.fromEntries(marketSearchParams(query)),
+      value: Object.fromEntries(marketSearchParams(marketQuery)),
     });
   }
 
@@ -406,6 +431,7 @@ export function MarketScreener({
             <button
               type="button"
               className={showWatchlist ? "active" : ""}
+              disabled={authPending || watchlistResult.isPending}
               aria-pressed={showWatchlist}
               onClick={() => handleWatchlistMode(true)}
             >
@@ -468,10 +494,18 @@ export function MarketScreener({
             onClick={saveCurrentScreen}
             disabled={authPending || saveScreenMutation.isPending}
           >
-            {user ? "Save screen" : "🔒 Save screen"}
+            Save screen
           </button>
         </form>
 
+        {(watchlistMutation.isError ||
+          saveScreenMutation.isError ||
+          watchlistResult.isError) && (
+          <p role="alert">
+            Could not load or save your workspace. Check your connection or
+            browser storage and try again.
+          </p>
+        )}
         {result.isError ? (
           <div className="state-card">
             <span>!</span>
@@ -533,7 +567,7 @@ export function MarketScreener({
                 </tr>
               </thead>
               <tbody>
-                {result.isLoading
+                {result.isLoading && !emptyWatchlist
                   ? Array.from({ length: 10 }, (_, index) => (
                       <tr key={index} className="skeleton-row">
                         <td colSpan={9}>
@@ -565,13 +599,23 @@ export function MarketScreener({
                     ))}
               </tbody>
             </table>
-            {!result.isLoading && !table.getRowModel().rows.length && (
-              <div className="state-card">
-                <span>⌕</span>
-                <h2>No assets match this screen</h2>
-                <p>Remove a filter or broaden your search.</p>
-              </div>
-            )}
+            {(emptyWatchlist ||
+              (!result.isPending && !result.isPlaceholderData)) &&
+              !table.getRowModel().rows.length && (
+                <div className="state-card">
+                  <span>⌕</span>
+                  <h2>
+                    {emptyWatchlist
+                      ? "Your watchlist is empty"
+                      : "No assets match this screen"}
+                  </h2>
+                  <p>
+                    {emptyWatchlist
+                      ? "Add assets from the All view to see them here."
+                      : "Remove a filter or broaden your search."}
+                  </p>
+                </div>
+              )}
           </div>
         )}
         {pagination && (
@@ -605,11 +649,6 @@ export function MarketScreener({
           </div>
         )}
       </section>
-      <AuthGateDialog
-        open={gate !== null}
-        onClose={() => setGate(null)}
-        feature={gate ?? "saved research"}
-      />
     </>
   );
 }

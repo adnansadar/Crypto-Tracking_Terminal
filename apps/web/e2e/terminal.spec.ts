@@ -75,28 +75,58 @@ test("comparison workflow loads", async ({ page }) => {
   await expect(page.getByLabel("Chart metric")).toHaveValue("normalizedReturn");
 });
 
-test("guest workspace and market persistence actions are locked", async ({
+test("guest watchlist survives rapid scope changes and reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Add Bitcoin to watchlist", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Remove Bitcoin from watchlist",
+      exact: true,
+    }),
+  ).toBeEnabled();
+  for (let i = 0; i < 3; i++) {
+    await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+    await expect(page.getByRole("link", { name: /Bitcoin #/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ethereum #/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "All", exact: true }).click();
+  }
+  await page.reload();
+  await expect(
+    page.getByRole("button", {
+      name: "Remove Bitcoin from watchlist",
+      exact: true,
+    }),
+  ).toBeEnabled();
+});
+
+test("guest workspace saves watchlists and screens across reloads", async ({
   page,
 }) => {
   await page.goto("/workspace");
   await expect(
-    page.getByRole("heading", { name: "Build a private research library." }),
+    page.getByRole("heading", { name: "Watchlists", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("textbox")).toHaveCount(0);
+  page.once("dialog", (dialog) => dialog.accept("Guest collection"));
+  await page.getByRole("button", { name: "New list" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Guest collection" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Guest collection" }),
+  ).toBeVisible();
 
   await page.goto("/");
   await page.waitForLoadState("networkidle");
   const saveScreen = page.getByRole("button", { name: /Save screen/ });
+  page.once("dialog", (dialog) => dialog.accept("Guest screen"));
   await saveScreen.click();
-  const dialog = page.getByRole("dialog", {
-    name: "Keep your research private.",
-  });
-  await expect(dialog).toBeVisible();
-  await expect(
-    dialog.getByRole("link", { name: "Create account" }),
-  ).toHaveAttribute("href", /mode=signup/);
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await expect(saveScreen).toBeFocused();
+  await page.goto("/workspace");
+  await expect(page.getByText("Guest screen", { exact: true })).toBeVisible();
 });
 
 test("legacy guest data is removed while theme preference survives", async ({

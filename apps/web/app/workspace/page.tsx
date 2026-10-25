@@ -10,7 +10,8 @@ export default function WorkspacePage() {
           <p className="eyebrow">Research workspace</p>
           <h1>Keep your thesis organized.</h1>
           <p>
-            Watchlists, saved screens, and notes stay private in your account.
+            Organize watchlists, saved screens, and notes. Start without an
+            account.
           </p>
         </div>
       </section>

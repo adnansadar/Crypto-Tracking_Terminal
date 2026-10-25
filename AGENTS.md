@@ -10,7 +10,7 @@ Crypto Research Terminal is an npm-workspaces monorepo built with TypeScript and
 - `apps/api`: Express 5 API using Better Auth, Prisma, PostgreSQL, Redis, and CoinGecko.
 - `packages/contracts`: shared Zod schemas and inferred TypeScript types used at both application boundaries.
 
-The browser must call the Express API rather than CoinGecko directly. Public market research is available to guests; all persistent workspace features require an authenticated account.
+The browser must call the Express API rather than CoinGecko directly. All research features are available to guests. Guest workspaces persist in the current browser; account workspaces sync through authenticated API routes.
 
 ## Repository map
 
@@ -18,7 +18,8 @@ The browser must call the Express API rather than CoinGecko directly. Public mar
 - `apps/web/components`: interactive client components and feature UI.
 - `apps/web/lib/api.ts`: typed HTTP client and workspace API operations.
 - `apps/web/lib/auth-client.ts`: centralized Better Auth browser client.
-- `apps/web/lib/theme.ts`: the only intentional application use of `localStorage`.
+- `apps/web/lib/theme.ts`: theme preferences and legacy storage cleanup.
+- `apps/web/lib/guest-workspace.ts`: versioned browser-local guest workspace storage.
 - `apps/web/e2e`: Playwright desktop, mobile, and accessibility journeys.
 - `apps/api/src/app.ts`: Express application composition and public capability endpoints.
 - `apps/api/src/market-routes.ts`: public market and research endpoints.
@@ -73,7 +74,7 @@ The contracts workspace must be built before downstream workspaces consume newly
   - Google requires `DATABASE_URL`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`.
   - Email/password requires `DATABASE_URL`, `RESEND_API_KEY`, and `AUTH_EMAIL_FROM`.
   - Production authentication also requires an explicit `BETTER_AUTH_SECRET`.
-- PostgreSQL is the source of truth for accounts and workspace data. Redis is only a cache.
+- PostgreSQL is the source of truth for account workspace data. Guest workspace data stays in browser storage. Redis is only a cache.
 - Do not commit `.next`, `dist`, coverage, Playwright reports, logs, or generated Prisma client output.
 - When the Prisma schema changes, add a migration and run `npm run db:generate`.
 
@@ -94,17 +95,17 @@ The contracts workspace must be built before downstream workspaces consume newly
 - Preserve validated relative `returnTo` redirects. Never allow an external URL as an authentication callback.
 - Email/password accounts require email verification. Keep password reset and verification responses privacy-preserving.
 - Google is the only social provider unless the product requirements explicitly change.
-- Guests may browse markets, comparisons, and coin research but may not read, edit, or persist watchlists, saved screens, or research notes.
-- Do not reintroduce guest workspace storage, guest-to-account merging, recently viewed persistence, or workspace data in `localStorage`.
-- `cryptoTerminal.theme` is the only intentional application `localStorage` value; preserve the pre-hydration theme script.
+- Guests may use watchlists, saved screens, and research notes through the browser-local workspace adapter.
+- Keep guest data separate from account data. Do not automatically merge workspaces or store sessions/tokens in browser storage.
+- Intentional localStorage keys are `cryptoTerminal.theme` and `cryptoTerminal.guestWorkspace.v1`; preserve the pre-hydration theme script.
 
 ### Web application
 
 - Use Server Components by default and add `"use client"` only where browser state, effects, or event handlers require it.
 - Use the centralized auth provider/client and `apps/web/lib/api.ts`; do not create feature-local session clients or ad hoc fetch layers.
 - Use TanStack Query for authenticated server state, with optimistic updates only when rollback is safe and explicit.
-- Do not request workspace data until the session is confirmed authenticated. On sign-out, immediately restore locked guest states.
-- Keep locked controls visible and route them through the reusable accessible auth prompt.
+- Resolve account state before choosing the account API or guest adapter. Scope query caches by owner and switch to the guest workspace on sign-out.
+- Keep workspace controls usable without an account; explain browser-only guest persistence.
 - Maintain keyboard navigation, focus restoration, reduced-motion behavior, semantic tables/forms, and accessible chart data summaries.
 
 ## Testing expectations
@@ -116,7 +117,7 @@ The contracts workspace must be built before downstream workspaces consume newly
 - During the live browser pass, verify interaction results and applicable loading, error, keyboard-focus, and accessibility states using fresh visual and accessibility output.
 - Keep `npm run test:e2e -w @crypto-terminal/web` as the deterministic automated browser suite; it complements rather than replaces the live in-app-browser pass. If the in-app browser remains unavailable after documented recovery, run Playwright and disclose the limitation at handoff.
 - Authentication or workspace changes must cover guest `401` responses and cross-user ownership boundaries.
-- UI locking changes must cover guests, authenticated users, sign-out transitions, keyboard behavior, and return links.
+- Workspace access changes must cover guests, authenticated users, sign-out transitions, keyboard behavior, and persistence.
 - Before handing off a broad change, run `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build`. Run Playwright when a browser-visible journey changed.
 
 ## Git commits

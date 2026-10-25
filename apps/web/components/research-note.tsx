@@ -2,13 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  deleteResearchNote,
-  getResearchNotes,
-  saveResearchNote,
-} from "@/lib/api";
-import { AuthGateDialog } from "./auth-gate-dialog";
-import { useAuth } from "./auth-provider";
+import { useWorkspace } from "@/lib/use-workspace";
 
 export function ResearchNote({
   coinId,
@@ -17,41 +11,14 @@ export function ResearchNote({
   coinId: string;
   coinName: string;
 }) {
-  const { user, isPending: authPending } = useAuth();
-  const [gateOpen, setGateOpen] = useState(false);
+  const { operations, owner, isPending: authPending } = useWorkspace();
   const notes = useQuery({
-    queryKey: ["workspace", "notes", user?.id],
-    queryFn: getResearchNotes,
-    enabled: Boolean(user),
+    queryKey: ["workspace", "notes", owner],
+    queryFn: operations.getResearchNotes,
+    enabled: !authPending,
   });
 
-  if (!user)
-    return (
-      <>
-        <section className="note-panel locked-note">
-          <div>
-            <p className="eyebrow">Private workspace</p>
-            <h2>Research note</h2>
-            <p>Sign up to capture your thesis and risks about {coinName}.</p>
-          </div>
-          <button
-            className="locked-note-preview"
-            disabled={authPending}
-            onClick={() => setGateOpen(true)}
-          >
-            <span aria-hidden="true">🔒</span>
-            Sign up to write a private note
-          </button>
-        </section>
-        <AuthGateDialog
-          open={gateOpen}
-          onClose={() => setGateOpen(false)}
-          feature="private research notes"
-        />
-      </>
-    );
-
-  if (notes.isLoading)
+  if (authPending || notes.isLoading)
     return (
       <section className="note-panel">Loading your research note…</section>
     );
@@ -70,10 +37,10 @@ export function ResearchNote({
   const note = notes.data?.find((item) => item.coinId === coinId);
   return (
     <ResearchNoteEditor
-      key={coinId}
+      key={`${owner}:${coinId}`}
       coinId={coinId}
       coinName={coinName}
-      userId={user.id}
+      userId={owner}
       initialBody={note?.body ?? ""}
     />
   );
@@ -90,13 +57,14 @@ function ResearchNoteEditor({
   userId: string;
   initialBody: string;
 }) {
+  const { operations, isGuest } = useWorkspace();
   const queryClient = useQueryClient();
   const [body, setBody] = useState(initialBody);
   const [saved, setSaved] = useState(false);
   const mutation = useMutation({
     mutationFn: async (value: string) => {
-      if (value.trim()) await saveResearchNote(coinId, value);
-      else await deleteResearchNote(coinId);
+      if (value.trim()) await operations.saveResearchNote(coinId, value);
+      else await operations.deleteResearchNote(coinId);
     },
     onSuccess: () => {
       setSaved(true);
@@ -113,6 +81,7 @@ function ResearchNoteEditor({
         <h2>Research note</h2>
         <p>
           Capture your thesis, risks, and follow-up questions about {coinName}.
+          {isGuest && " Saved in this browser only."}
         </p>
       </div>
       <label>

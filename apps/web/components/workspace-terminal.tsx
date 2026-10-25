@@ -3,43 +3,41 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  addWatchlistItem,
-  createWatchlist,
-  deleteSavedScreen,
-  deleteWatchlist,
-  getResearchNotes,
-  getSavedScreens,
-  getWatchlists,
-} from "@/lib/api";
-import { AuthGateDialog } from "./auth-gate-dialog";
-import { useAuth } from "./auth-provider";
+import { useWorkspace } from "@/lib/use-workspace";
 
 export function WorkspaceTerminal() {
-  const { user, isPending } = useAuth();
+  const { operations, owner, isPending, isGuest } = useWorkspace();
+  const {
+    addWatchlistItem,
+    createWatchlist,
+    deleteSavedScreen,
+    deleteWatchlist,
+    getResearchNotes,
+    getSavedScreens,
+    getWatchlists,
+  } = operations;
   const queryClient = useQueryClient();
-  const [gateOpen, setGateOpen] = useState(false);
   const [coinId, setCoinId] = useState("");
-  const enabled = Boolean(user);
+  const enabled = !isPending;
   const lists = useQuery({
-    queryKey: ["workspace", "watchlists", user?.id],
+    queryKey: ["workspace", "watchlists", owner],
     queryFn: getWatchlists,
     enabled,
   });
   const screens = useQuery({
-    queryKey: ["workspace", "screens", user?.id],
+    queryKey: ["workspace", "screens", owner],
     queryFn: getSavedScreens,
     enabled,
   });
   const notes = useQuery({
-    queryKey: ["workspace", "notes", user?.id],
+    queryKey: ["workspace", "notes", owner],
     queryFn: getResearchNotes,
     enabled,
   });
 
   const refresh = (area: string) =>
     queryClient.invalidateQueries({
-      queryKey: ["workspace", area, user?.id],
+      queryKey: ["workspace", area, owner],
     });
   const createList = useMutation({
     mutationFn: createWatchlist,
@@ -64,36 +62,6 @@ export function WorkspaceTerminal() {
       <div className="terminal-panel state-card compact">
         Checking account access…
       </div>
-    );
-
-  if (!user)
-    return (
-      <>
-        <section className="terminal-panel workspace-lock">
-          <span className="lock-mark" aria-hidden="true">
-            🔒
-          </span>
-          <p className="eyebrow">Account-only workspace</p>
-          <h2>Build a private research library.</h2>
-          <p>
-            Create an account to save watchlists, reusable market screens, and
-            research notes securely across devices.
-          </p>
-          <button className="primary-button" onClick={() => setGateOpen(true)}>
-            Unlock workspace
-          </button>
-          <div className="locked-feature-grid" aria-hidden="true">
-            <span>Watchlists</span>
-            <span>Saved screens</span>
-            <span>Research notes</span>
-          </div>
-        </section>
-        <AuthGateDialog
-          open={gateOpen}
-          onClose={() => setGateOpen(false)}
-          feature="the research workspace"
-        />
-      </>
     );
 
   if (lists.isLoading || screens.isLoading || notes.isLoading)
@@ -132,6 +100,21 @@ export function WorkspaceTerminal() {
 
   return (
     <div className="workspace-grid">
+      {isGuest && (
+        <p role="note" style={{ gridColumn: "1 / -1" }}>
+          Your guest workspace is saved in this browser. Clearing browser data
+          removes it. Account workspaces sync separately across devices.
+        </p>
+      )}
+      {(createList.isError ||
+        removeList.isError ||
+        addItem.isError ||
+        removeScreen.isError) && (
+        <p role="alert">
+          Could not save your changes. Check your connection or browser storage
+          and try again.
+        </p>
+      )}
       <section className="terminal-panel workspace-section watchlists">
         <div className="panel-heading">
           <div>
